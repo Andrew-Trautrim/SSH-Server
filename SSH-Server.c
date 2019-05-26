@@ -8,6 +8,8 @@
 #include <stdlib.h>
 #include <stdio.h>
 
+int verifyHost(ssh_session session);
+
 void closeChannel(const char *errorMesg, ssh_channel channel);
 void closeSession(const char *errorMesg, ssh_session session);
 
@@ -46,8 +48,8 @@ int main(int argc, char **argv) {
 	}
 
 	// host verification
-	if(verify_knownhost(session) < 0) {
-		closeSession("Unknown host", session);
+	if(verifyHost(session) == -1) {
+		closeSession("Unable to verify host", session);
 		return -1;
 	}
 
@@ -84,6 +86,29 @@ int main(int argc, char **argv) {
 	closeChannel(NULL, channel);
 	closeSession(NULL, session);
 	return 1;
+}
+
+int verifyHost(ssh_session session) {
+
+	switch (ssh_session_is_known_server(session)) {
+		case SSH_KNOWN_HOST:
+			return 1;
+		case SSH_KNOWN_HOSTS_NOT_FOUND:
+			fprintf(stderr, "Host not listed in known hosts file.\n");
+			/* carry on to SSH_KNWON_HOSTS_UNKNOWN */
+		case SSH_KNOWN_HOSTS_UNKNOWN:
+			fprintf(stderr, "Unknown server.\n");
+			char input;
+			do {
+				fprintf(stderr, "Verify and add to known hosts file [Y/N]: ");
+				input = fgetc(stdin);
+			} while (input != 'Y' && input != 'N');
+			return (input == 'Y') ? 1 : -1;
+		default:
+			fprintf(stderr, "Error: %s\n", ssh_get_error(session));
+			return -1;
+	}
+	return -1;
 }
 
 /*
