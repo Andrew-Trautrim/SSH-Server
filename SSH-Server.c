@@ -4,12 +4,12 @@
  * Remote SSH server using libssh library
  */
 
-#include <libssh/libssh.h>
+#include "libssh/include/libssh/libssh.h"
 #include <stdlib.h>
 #include <stdio.h>
-#include <windows.h>
 
-void closeSession(char *errorMesg, ssh_sesion session);
+void closeChannel(const char *errorMesg, ssh_channel channel);
+void closeSession(const char *errorMesg, ssh_session session);
 
 int main(int argc, char **argv) {
 	
@@ -20,7 +20,7 @@ int main(int argc, char **argv) {
 	}
 
 	char *user = argv[1];
-	char *passwd = agv[2];
+	char *passwd = argv[2];
 	char *host = argv[3];
 	// default TCP port is 22
 	int port = (argv[4] == NULL) ? 22 : atoi(argv[4]);
@@ -34,7 +34,7 @@ int main(int argc, char **argv) {
 
 	// modify session settings
 	ssh_options_set(session, SSH_OPTIONS_HOST, host);
-	ssh_options_set(session, SSH_OPTIONS_PORT, port);
+	ssh_options_set(session, SSH_OPTIONS_PORT, &port);
 	ssh_options_set(session, SSH_OPTIONS_USER, user);
 
 	// connect to server
@@ -47,7 +47,7 @@ int main(int argc, char **argv) {
 
 	// host verification
 	if(verify_knownhost(session) < 0) {
-		closeSession("Unknown host", session)
+		closeSession("Unknown host", session);
 		return -1;
 	}
 
@@ -60,16 +60,42 @@ int main(int argc, char **argv) {
 
 	// Create remote shell
 	ssh_channel channel = ssh_channel_new(session);
-	if(channel == NULL) {
-		closeSession("Unable to create channel", session);
+	if (channel == NULL) {
+		closeChannel("Unable to create channel", channel);
+		closeSession(NULL, session);
+		return -1;
+	}
+	// opens channel to create command interpreter
+	rc = ssh_channel_open_session(channel);
+	if (rc != SSH_OK) {
+		closeChannel("Unable to open channel", channel);
+		closeSession(NULL, session);
 		return -1;
 	}
 
-	// TODO
-	// Open remote shell/ pass command
+	// interactive session
+	while (ssh_channel_is_open(channel) && !ssh_channel_is_eof(channel)) {
+		
+	}
 
+	// TODO
+	// Open remote shell / pass remote command
+
+	closeChannel(NULL, channel);
 	closeSession(NULL, session);
 	return 1;
+}
+
+/*
+ * prints error message if needed
+ * disconnects/deallocates ssh channel
+ */
+void closeChannel(const char* errorMesg, ssh_channel channel) {
+	if (errorMesg != NULL)
+		printf("%s: %s\n", errorMesg, ssh_get_error(channel));
+	ssh_channel_close(channel);
+	ssh_channel_free(channel);
+	return;
 }
 
 /*
