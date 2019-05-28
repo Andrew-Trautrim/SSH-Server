@@ -4,7 +4,8 @@
  * Remote SSH server using libssh library
  */
 
-#include "libssh/include/libssh/libssh.h"
+#define LIBSSH_STATIC 1
+#include <libssh/libssh.h>
 #include <stdlib.h>
 #include <stdio.h>
 
@@ -88,10 +89,14 @@ int main(int argc, char **argv) {
 	return 1;
 }
 
+/*
+ * Verifies validity of host
+ * checks internal known hosts file
+ */
 int verifyHost(ssh_session session) {
 
 	switch (ssh_session_is_known_server(session)) {
-		case SSH_KNOWN_HOST:
+		case SSH_KNOWN_HOSTS_OK:
 			return 1;
 		case SSH_KNOWN_HOSTS_NOT_FOUND:
 			fprintf(stderr, "Host not listed in known hosts file.\n");
