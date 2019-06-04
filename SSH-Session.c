@@ -9,17 +9,16 @@
 #include <stdio.h>
 #include <unistd.h>
 
-int input();
-int remoteSession(ssh_channel channel);
-int verifyHost(ssh_session session);
+int remote_session(ssh_session session);
+int verify_host(ssh_session session);
 
-void closeChannel(const char *errorMesg, ssh_channel channel);
-void closeSession(const char *errorMesg, ssh_session session);
+void close_channel(const char *errorMesg, ssh_channel channel);
+void close_session(const char *errorMesg, ssh_session session);
 
 int main(int argc, char **argv) {
 
-	char user[50], passwd[50], host[50];
-
+	/*
+	char user[50], passwd[50], host[50];	
 	// User
 	fprintf(stdout, "user: ");
 	fgets(user, 50, stdin);
@@ -29,9 +28,10 @@ int main(int argc, char **argv) {
 	// Host
 	fprintf(stdout, "host: ");
 	fgets(host, 50, stdin);
-
+	
 	// default TCP port is 22
 	int port = (argv[1] == NULL) ? 22 : atoi(argv[4]);
+	*/
 
 	// create new session
 	ssh_session session = ssh_new();
@@ -41,37 +41,37 @@ int main(int argc, char **argv) {
 	}
 
 	// modify session settings
-	ssh_options_set(session, SSH_OPTIONS_HOST, host);
-	ssh_options_set(session, SSH_OPTIONS_PORT, &port);
-	ssh_options_set(session, SSH_OPTIONS_USER, user);
+	ssh_options_set(session, SSH_OPTIONS_HOST, "localhost");
+	//ssh_options_set(session, SSH_OPTIONS_PORT, &port);
+	//ssh_options_set(session, SSH_OPTIONS_USER, user);
 
 	// connect to server
 	int rc = ssh_connect(session);
 	// verify connection
 	if (rc != SSH_OK) {
-		closeSession("Unable to connect to host", session);
+		close_session("Unable to connect to host", session);
 		return -1;
 	}
 
 	// host verification
-	if(verifyHost(session) == -1) {
-		closeSession("Unable to verify host", session);
+	if(verify_host(session) == -1) {
+		close_session("Unable to verify host", session);
 		return -1;
 	}
 
+	/*
 	// password authentication
 	rc = ssh_userauth_password(session, user, passwd);
 	if (rc != SSH_AUTH_SUCCESS) {
-		closeSession("Password authentication error", session);
+		close_session("Password authentication error", session);
 		return -1;
 	}
+	*/
 
-	// interactive session
-	rc = remoteSession(channel);
+	// non-interactive session
+	rc = remote_session(session);
 
-	ssh_channel_send_eof(channel);
-	closeChannel(NULL, channel);
-	closeSession(NULL, session);
+	close_session(NULL, session);
 	return 1;
 }
 
@@ -81,24 +81,27 @@ int main(int argc, char **argv) {
  * prints data recieved
  * sends input to remote device
  */
-int remoteSession(ssh_session session) {
+int remote_session(ssh_session session) {
 	int rc;
 
-	// Create remote shell
+	// Creating remote shell
+	fprintf(stdout, "creating remote shell...\n");
 	ssh_channel channel = ssh_channel_new(session);
 	if (channel == NULL) {
-		closeChannel("Unable to create channel", channel);
+		close_channel("Unable to create channel", channel);
 		return SSH_ERROR;
 	}
 
 	// opens channel for command interpreter
+	fprintf(stdout, "opening channel...\n");
 	rc = ssh_channel_open_session(channel);
 	if (rc != SSH_OK) {
-		closeChannel("Unable to open channel", channel);
+		close_channel("Unable to open channel", channel);
 		return rc;
 	}
 
 	// session initialization
+	fprintf(stdout, "requesting shell...\n");
 	rc = ssh_channel_request_shell(channel);
 	if (rc != SSH_OK)
 		return rc;
@@ -107,30 +110,31 @@ int remoteSession(ssh_session session) {
 	int nbytes, nwritten;
 	char buffer[256], cmd[256];
 
+	fprintf(stdout, "Session:\n");
 	// non-interactive session
 	do {
 		fprintf(stdout, ">");
 		if (fgets(cmd, 256, stdin) != NULL) {
-			rc = ssh_request_exec(channel, cmd);
+			rc = ssh_channel_request_exec(channel, cmd);
 			if (rc != SSH_OK) {
-				closeChannel("Unable to send remote data", channel);
+				close_channel("Unable to send remote data", channel);
 				return rc;
 			}
 		}
 
 		nbytes = ssh_channel_read(channel, buffer, sizeof(buffer), 0);
 		if (fwrite(buffer, 1, nbytes, stdout) != nbytes) {
-			closeChannel("Unable to display remote data", channel);
+			close_channel("Unable to display remote data", channel);
 			return SSH_ERROR;
 		}
 	} while (nbytes > 0);
 	
 	if (nbytes < 0) {
-		closeChannel("Unable to read remote data", channel);
+		close_channel("Unable to read remote data", channel);
 		return SSH_ERROR;
 	}
 
-	closeChannel(NULL, channel);
+	close_channel(NULL, channel);
 	return SSH_OK;
 }
 
@@ -138,7 +142,7 @@ int remoteSession(ssh_session session) {
  * Verifies validity of host
  * checks internal known hosts file
  */
-int verifyHost(ssh_session session) {
+int verify_host(ssh_session session) {
 
 	switch (ssh_session_is_known_server(session)) {
 		case SSH_KNOWN_HOSTS_OK:
@@ -165,7 +169,7 @@ int verifyHost(ssh_session session) {
  * prints error message if needed
  * disconnects/deallocates ssh channel
  */
-void closeChannel(const char* errorMesg, ssh_channel channel) {
+void close_channel(const char* errorMesg, ssh_channel channel) {
 	if (errorMesg != NULL)
 		fprintf(stdout, "%s: %s\n", errorMesg, ssh_get_error(channel));
 	ssh_channel_close(channel);
@@ -177,7 +181,7 @@ void closeChannel(const char* errorMesg, ssh_channel channel) {
  * prints error message if needed
  * disconnects/deallocates ssh session
  */
-void closeSession(const char *errorMesg, ssh_session session) {
+void close_session(const char *errorMesg, ssh_session session) {
 	if (errorMesg != NULL) 
 		fprintf(stdout, "%s: %s\n", errorMesg, ssh_get_error(session));
 	ssh_disconnect(session);
