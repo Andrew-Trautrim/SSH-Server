@@ -4,29 +4,34 @@
  * Remote SSH server using libssh library
  */
 
-#define LIBSSH_STATIC 1
 #include <libssh/libssh.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <unistd.h>
 
+int input();
+int remoteSession(ssh_channel channel);
 int verifyHost(ssh_session session);
 
 void closeChannel(const char *errorMesg, ssh_channel channel);
 void closeSession(const char *errorMesg, ssh_session session);
 
 int main(int argc, char **argv) {
-	
-	// checks for proper input
-	if(argc != 4 && argc != 5) {
-		printf("Usage: %s <user> <passwd> <host> [port]\n", argv[0]);
-		return -1;
-	}
 
-	char *user = argv[1];
-	char *passwd = argv[2];
-	char *host = argv[3];
+	char user[50], passwd[50], host[50];
+
+	// User
+	fprintf(stdout, "user: ");
+	fgets(user, 50, stdin);
+	// Password
+	fprintf(stdout, "password: ");
+	fgets(passwd, 50, stdin);
+	// Host
+	fprintf(stdout, "host: ");
+	fgets(host, 50, stdin);
+
 	// default TCP port is 22
-	int port = (argv[4] == NULL) ? 22 : atoi(argv[4]);
+	int port = (argv[1] == NULL) ? 22 : atoi(argv[4]);
 
 	// create new session
 	ssh_session session = ssh_new();
@@ -61,32 +66,72 @@ int main(int argc, char **argv) {
 		return -1;
 	}
 
+	// interactive session
+	rc = remoteSession(channel);
+
+	ssh_channel_send_eof(channel);
+	closeChannel(NULL, channel);
+	closeSession(NULL, session);
+	return 1;
+}
+
+/*
+ * non-interactive session
+ * runs command remotely in the background
+ * prints data recieved
+ * sends input to remote device
+ */
+int remoteSession(ssh_session session) {
+	int rc;
+
 	// Create remote shell
 	ssh_channel channel = ssh_channel_new(session);
 	if (channel == NULL) {
 		closeChannel("Unable to create channel", channel);
-		closeSession(NULL, session);
-		return -1;
+		return SSH_ERROR;
 	}
-	// opens channel to create command interpreter
+
+	// opens channel for command interpreter
 	rc = ssh_channel_open_session(channel);
 	if (rc != SSH_OK) {
 		closeChannel("Unable to open channel", channel);
-		closeSession(NULL, session);
-		return -1;
+		return rc;
 	}
 
-	// interactive session
-	while (ssh_channel_is_open(channel) && !ssh_channel_is_eof(channel)) {
-		
-	}
+	// session initialization
+	rc = ssh_channel_request_shell(channel);
+	if (rc != SSH_OK)
+		return rc;
 
-	// TODO
-	// Open remote shell / pass remote command
+	// display directory and contents
+	int nbytes, nwritten;
+	char buffer[256], cmd[256];
+
+	// non-interactive session
+	do {
+		fprintf(stdout, ">");
+		if (fgets(cmd, 256, stdin) != NULL) {
+			rc = ssh_request_exec(channel, cmd);
+			if (rc != SSH_OK) {
+				closeChannel("Unable to send remote data", channel);
+				return rc;
+			}
+		}
+
+		nbytes = ssh_channel_read(channel, buffer, sizeof(buffer), 0);
+		if (fwrite(buffer, 1, nbytes, stdout) != nbytes) {
+			closeChannel("Unable to display remote data", channel);
+			return SSH_ERROR;
+		}
+	} while (nbytes > 0);
+	
+	if (nbytes < 0) {
+		closeChannel("Unable to read remote data", channel);
+		return SSH_ERROR;
+	}
 
 	closeChannel(NULL, channel);
-	closeSession(NULL, session);
-	return 1;
+	return SSH_OK;
 }
 
 /*
@@ -122,7 +167,7 @@ int verifyHost(ssh_session session) {
  */
 void closeChannel(const char* errorMesg, ssh_channel channel) {
 	if (errorMesg != NULL)
-		printf("%s: %s\n", errorMesg, ssh_get_error(channel));
+		fprintf(stdout, "%s: %s\n", errorMesg, ssh_get_error(channel));
 	ssh_channel_close(channel);
 	ssh_channel_free(channel);
 	return;
@@ -134,7 +179,7 @@ void closeChannel(const char* errorMesg, ssh_channel channel) {
  */
 void closeSession(const char *errorMesg, ssh_session session) {
 	if (errorMesg != NULL) 
-		printf("%s: %s\n", errorMesg, ssh_get_error(session));
+		fprintf(stdout, "%s: %s\n", errorMesg, ssh_get_error(session));
 	ssh_disconnect(session);
 	ssh_free(session);
 	return;
