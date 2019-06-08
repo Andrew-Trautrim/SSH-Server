@@ -91,15 +91,15 @@ int authenticate_password(ssh_session session, char *user, char *password) {
  * authenticates network over public key
  */
 int authenticate_public_key(ssh_session session, char *user, char *passphrase) {
-	ssh_key pub_key = malloc(sizeof(ssh_key));
-	ssh_key priv_key = malloc(sizeof(ssh_key));
+	ssh_key pub_key;
+	ssh_key priv_key;
 	int rc;
 	
 	// imports public key from file
 	rc = ssh_pki_import_pubkey_file("~/.ssh/pub_key.pub", &pub_key);
 	if (rc != SSH_OK) {
 		// returns error is unable to authenticate
-
+		ssh_key_free(pub_key);
 		close_session("Unable to retrieve public key", session);
 		return SSH_ERROR;
 	}
@@ -108,13 +108,12 @@ int authenticate_public_key(ssh_session session, char *user, char *passphrase) {
 	rc = ssh_userauth_try_publickey(session, NULL, pub_key);
 	if (rc != SSH_AUTH_SUCCESS && rc != SSH_AUTH_PARTIAL) {
 		ssh_key_free(pub_key);
-		ssh_key_free(priv_key);
 		close_session("Public key authentication error", session);
 		return SSH_ERROR;
 	}
 
 	// retrieves the private key
-	rc = ssh_pki_import_privkey_file("~/.ssh/pub_key", passphrase, NULL, NULL, &priv_key);
+	rc = ssh_pki_import_privkey_file("~/.ssh/priv_key", passphrase, NULL, NULL, &priv_key);
 	if (rc != SSH_OK) {
 		ssh_key_free(pub_key);
 		ssh_key_free(priv_key);
