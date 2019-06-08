@@ -9,29 +9,31 @@
 #include <stdio.h>
 #include <unistd.h>
 
+int authenticate_password(ssh_session session, char *user, char *password);
+int authenticate_public_key(ssh_session session, char *user, char *password);
 int remote_session(ssh_session session);
 int verify_host(ssh_session session);
 
-void close_channel(const char *errorMesg, ssh_channel channel);
-void close_session(const char *errorMesg, ssh_session session);
+void close_channel(const char *error_mesg, ssh_channel channel);
+void close_session(const char *error_mesg, ssh_session session);
 
 int main(int argc, char **argv) {
 
-	/*
-	char user[50], passwd[50], host[50];	
+	char user[50], host[50];	
 	// User
-	fprintf(stdout, "user: ");
+	fprintf(stdout, "User: ");
 	fgets(user, 50, stdin);
 	// Password
-	fprintf(stdout, "password: ");
-	fgets(passwd, 50, stdin);
+	char *password = getpass("Password: ");
 	// Host
-	fprintf(stdout, "host: ");
+	fprintf(stdout, "Host: ");
 	fgets(host, 50, stdin);
+	// Private key passphrase
+	char *passphrase = getpass("Passphrase: ");
+
 	
 	// default TCP port is 22
 	int port = (argv[1] == NULL) ? 22 : atoi(argv[4]);
-	*/
 
 	// create new session
 	ssh_session session = ssh_new();
@@ -41,9 +43,9 @@ int main(int argc, char **argv) {
 	}
 
 	// modify session settings
-	ssh_options_set(session, SSH_OPTIONS_HOST, "localhost");
-	//ssh_options_set(session, SSH_OPTIONS_PORT, &port);
-	//ssh_options_set(session, SSH_OPTIONS_USER, user);
+	ssh_options_set(session, SSH_OPTIONS_HOST, host);
+	ssh_options_set(session, SSH_OPTIONS_PORT, &port);
+	ssh_options_set(session, SSH_OPTIONS_USER, user);
 
 	// connect to server
 	int rc = ssh_connect(session);
@@ -59,20 +61,80 @@ int main(int argc, char **argv) {
 		return -1;
 	}
 
-	/*
-	// password authentication
-	rc = ssh_userauth_password(session, user, passwd);
-	if (rc != SSH_AUTH_SUCCESS) {
-		close_session("Password authentication error", session);
+	// public key authentication
+	if (authenticate_public_key(session, user, passphrase) == SSH_AUTH_ERROR)
 		return -1;
-	}
-	*/
+	// password authentication
+	if (authenticate_password(session, user, password) == SSH_AUTH_ERROR)
+		return -1;
 
 	// non-interactive session
 	rc = remote_session(session);
 
 	close_session(NULL, session);
 	return 1;
+}
+
+/*
+ * authenticates network through given password
+ */
+int authenticate_password(ssh_session session, char *user, char *password) {
+	int rc = ssh_userauth_password(session, user, password);
+	if (rc != SSH_AUTH_SUCCESS) {
+		close_session("Password authentication error", session);
+		return SSH_ERROR;
+	}
+	return rc;
+}
+
+/*
+ * authenticates network over public key
+ */
+int authenticate_public_key(ssh_session session, char *user, char *passphrase) {
+	ssh_key pub_key = malloc(sizeof(ssh_key));
+	ssh_key priv_key = malloc(sizeof(ssh_key));
+	int rc;
+	
+	// imports public key from file
+	rc = ssh_pki_import_pubkey_file("~/.ssh/pub_key.pub", &pub_key);
+	switch(rc) {
+		case SSH_EOF:
+			printf("SSH_EOF\n");
+			break;
+		case SSH_ERROR:
+			printf("SSH_ERROR\n");
+			break;
+	}
+	if (rc != SSH_OK) {
+		// returns error is unable to authenticate
+		close_session("Unable to retrieve public key", session);
+		return SSH_ERROR;
+	}
+
+	// determines if authentication with the public key is possible
+	rc = ssh_userauth_try_publickey(session, NULL, pub_key);
+	if (rc != SSH_AUTH_SUCCESS && rc != SSH_AUTH_PARTIAL) {
+		close_session("Public key authentication error", session);
+		return SSH_ERROR;
+	}
+
+	// retrieves the private key
+	rc = ssh_pki_import_privkey_file("~/.ssh/pub_key", passphrase, NULL, NULL, &priv_key);
+	if (rc != SSH_OK) {
+		close_session("Unable to retireve private key", session);
+		return SSH_ERROR;
+	}
+
+	// authenticates prublic/private key pair
+	rc = ssh_userauth_publickey(session, user, priv_key); 
+	if (rc != SSH_AUTH_SUCCESS && rc != SSH_AUTH_PARTIAL) {
+		close_session("Publie/Private key authentication error", session);
+		return SSH_ERROR;
+	}
+
+	ssh_key_free(pub_key);
+	ssh_key_free(priv_key);
+	return rc;
 }
 
 /*
@@ -144,6 +206,7 @@ int remote_session(ssh_session session) {
  */
 int verify_host(ssh_session session) {
 
+	char input;
 	switch (ssh_session_is_known_server(session)) {
 		case SSH_KNOWN_HOSTS_OK:
 			return 1;
@@ -151,10 +214,8 @@ int verify_host(ssh_session session) {
 			fprintf(stderr, "Host not listed in known hosts file.\n");
 			/* carry on to SSH_KNWON_HOSTS_UNKNOWN */
 		case SSH_KNOWN_HOSTS_UNKNOWN:
-			fprintf(stderr, "Unknown server.\n");
-			char input;
 			do {
-				fprintf(stderr, "Verify and add to known hosts file [Y/N]: ");
+				fprintf(stderr, "Verify host [Y/N]: ");
 				input = fgetc(stdin);
 			} while (input != 'Y' && input != 'N');
 			return (input == 'Y') ? 1 : -1;
@@ -169,9 +230,9 @@ int verify_host(ssh_session session) {
  * prints error message if needed
  * disconnects/deallocates ssh channel
  */
-void close_channel(const char* errorMesg, ssh_channel channel) {
-	if (errorMesg != NULL)
-		fprintf(stdout, "%s: %s\n", errorMesg, ssh_get_error(channel));
+void close_channel(const char* error_mesg, ssh_channel channel) {
+	if (error_mesg != NULL)
+		fprintf(stdout, "%s: %s\n", error_mesg, ssh_get_error(channel));
 	ssh_channel_close(channel);
 	ssh_channel_free(channel);
 	return;
@@ -181,9 +242,9 @@ void close_channel(const char* errorMesg, ssh_channel channel) {
  * prints error message if needed
  * disconnects/deallocates ssh session
  */
-void close_session(const char *errorMesg, ssh_session session) {
-	if (errorMesg != NULL) 
-		fprintf(stdout, "%s: %s\n", errorMesg, ssh_get_error(session));
+void close_session(const char *error_mesg, ssh_session session) {
+	if (error_mesg != NULL) 
+		fprintf(stdout, "%s: %s\n", error_mesg, ssh_get_error(session));
 	ssh_disconnect(session);
 	ssh_free(session);
 	return;
