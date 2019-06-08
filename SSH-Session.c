@@ -97,16 +97,9 @@ int authenticate_public_key(ssh_session session, char *user, char *passphrase) {
 	
 	// imports public key from file
 	rc = ssh_pki_import_pubkey_file("~/.ssh/pub_key.pub", &pub_key);
-	switch(rc) {
-		case SSH_EOF:
-			printf("SSH_EOF\n");
-			break;
-		case SSH_ERROR:
-			printf("SSH_ERROR\n");
-			break;
-	}
 	if (rc != SSH_OK) {
 		// returns error is unable to authenticate
+
 		close_session("Unable to retrieve public key", session);
 		return SSH_ERROR;
 	}
@@ -114,6 +107,8 @@ int authenticate_public_key(ssh_session session, char *user, char *passphrase) {
 	// determines if authentication with the public key is possible
 	rc = ssh_userauth_try_publickey(session, NULL, pub_key);
 	if (rc != SSH_AUTH_SUCCESS && rc != SSH_AUTH_PARTIAL) {
+		ssh_key_free(pub_key);
+		ssh_key_free(priv_key);
 		close_session("Public key authentication error", session);
 		return SSH_ERROR;
 	}
@@ -121,13 +116,17 @@ int authenticate_public_key(ssh_session session, char *user, char *passphrase) {
 	// retrieves the private key
 	rc = ssh_pki_import_privkey_file("~/.ssh/pub_key", passphrase, NULL, NULL, &priv_key);
 	if (rc != SSH_OK) {
-		close_session("Unable to retireve private key", session);
+		ssh_key_free(pub_key);
+		ssh_key_free(priv_key);
+		close_session("Unable to retrieve private key", session);
 		return SSH_ERROR;
 	}
 
 	// authenticates prublic/private key pair
 	rc = ssh_userauth_publickey(session, user, priv_key); 
 	if (rc != SSH_AUTH_SUCCESS && rc != SSH_AUTH_PARTIAL) {
+		ssh_key_free(pub_key);
+		ssh_key_free(priv_key);
 		close_session("Publie/Private key authentication error", session);
 		return SSH_ERROR;
 	}
